@@ -1,0 +1,162 @@
+# n8n-nodes-aws-sdk-v3
+
+This is an n8n community node that allows you to execute custom JavaScript code with pre-configured AWS SDK v3 clients (S3, Bedrock, SSM) in your n8n workflows.
+
+**Note:** This node uses external dependencies (AWS SDK v3) and is only compatible with self-hosted n8n installations. It cannot be used on n8n Cloud.
+
+[n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/sustainable-use-license/) workflow automation platform.
+
+[Installation](#installation)  
+[Operations](#operations)  
+[Credentials](#credentials)  
+[Compatibility](#compatibility)  
+[Usage](#usage)  
+[Resources](#resources)  
+[Version history](#version-history)
+
+## Installation
+
+Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes/installation/) in the n8n community nodes documentation.
+
+```bash
+npm install n8n-nodes-aws-sdk-v3
+```
+
+Or install it directly in your n8n instance via the Community Nodes settings.
+
+## Operations
+
+The **AWS Code** node provides a code editor where you can write custom JavaScript code with access to:
+
+### Pre-configured AWS Clients
+
+- `$s3` - Amazon S3 Client
+- `$bedrock` - Amazon Bedrock Runtime Client
+- `$ssm` - AWS Systems Manager (SSM) Client
+
+### Available AWS SDK Commands
+
+**S3 Commands:**
+- `ListBucketsCommand`
+- `GetObjectCommand`
+- `PutObjectCommand`
+- `DeleteObjectCommand`
+- `CopyObjectCommand`
+- `HeadObjectCommand`
+- `ListObjectsV2Command`
+- `CreateBucketCommand`
+- `DeleteBucketCommand`
+
+**Bedrock Commands:**
+- `InvokeModelCommand`
+- `InvokeModelWithResponseStreamCommand`
+- `ConverseCommand`
+- `ConverseStreamCommand`
+
+**SSM Commands:**
+- `GetParameterCommand`
+- `GetParametersCommand`
+- `GetParametersByPathCommand`
+- `PutParameterCommand`
+- `DeleteParameterCommand`
+- `DeleteParametersCommand`
+
+### Execution Modes
+
+- **Run Once for All Items** - Execute the code once with access to all input items via `$items`
+- **Run Once for Each Item** - Execute the code once for each input item via `$item`
+
+## Credentials
+
+Create **AWS SDK V3 API** credentials with:
+
+| Field | Description |
+|-------|-------------|
+| Access Key ID | Your AWS Access Key ID |
+| Secret Access Key | Your AWS Secret Access Key |
+| Region | AWS region (e.g., `eu-west-1`, `us-east-1`) |
+| Session Token | Optional - for temporary credentials (STS) |
+
+## Compatibility
+
+- Requires n8n version 1.0.0 or later
+- **Self-hosted n8n only** - Not compatible with n8n Cloud
+
+## Usage
+
+### Example: List S3 Buckets
+
+```javascript
+const response = await $s3.send(new ListBucketsCommand({}));
+return response.Buckets.map(b => ({ json: { name: b.Name } }));
+```
+
+### Example: Get SSM Parameter
+
+```javascript
+const response = await $ssm.send(new GetParameterCommand({
+  Name: '/my/parameter/path',
+  WithDecryption: true
+}));
+return [{ json: { value: response.Parameter.Value } }];
+```
+
+### Example: Invoke Bedrock Model (Claude)
+
+```javascript
+const response = await $bedrock.send(new ConverseCommand({
+  modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+  messages: [
+    {
+      role: 'user',
+      content: [{ text: $item.json.prompt }]
+    }
+  ]
+}));
+
+return [{
+  json: {
+    response: response.output.message.content[0].text
+  }
+}];
+```
+
+### Example: Upload to S3
+
+```javascript
+const response = await $s3.send(new PutObjectCommand({
+  Bucket: 'my-bucket',
+  Key: `files/${$item.json.filename}`,
+  Body: $item.json.content,
+  ContentType: 'text/plain'
+}));
+
+return [{ json: { success: true, etag: response.ETag } }];
+```
+
+### Available Variables
+
+| Variable | Description |
+|----------|-------------|
+| `$s3` | Pre-configured S3Client |
+| `$bedrock` | Pre-configured BedrockRuntimeClient |
+| `$ssm` | Pre-configured SSMClient |
+| `$items` | All input items (array) |
+| `$item` | Current item (in "Run Once for Each Item" mode) |
+| `$itemIndex` | Current item index |
+
+## Resources
+
+- [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
+- [AWS SDK for JavaScript v3 Documentation](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/)
+- [Amazon S3 Documentation](https://docs.aws.amazon.com/s3/)
+- [Amazon Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- [AWS Systems Manager Documentation](https://docs.aws.amazon.com/systems-manager/)
+
+## Version history
+
+### 0.1.0
+
+- Initial release
+- AWS Code node with S3, Bedrock, and SSM support
+- Custom credentials for AWS SDK v3
