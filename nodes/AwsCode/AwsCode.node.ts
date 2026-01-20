@@ -133,6 +133,19 @@ export class AwsCode implements INodeType {
 		],
 		properties: [
 			{
+				displayName: 'Available Variables',
+				name: 'notice',
+				type: 'notice',
+				default: '',
+				// eslint-disable-next-line n8n-nodes-base/node-param-description-unneeded-backticks
+				description: `<strong>AWS Clients:</strong> $s3, $bedrock, $ssm<br/>
+<strong>Input Data:</strong> $items, $item, $itemIndex<br/>
+<strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ...<br/>
+<strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ...<br/>
+<strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ...<br/>
+<em>Version: 0.1.1</em>`,
+			},
+			{
 				displayName: 'Mode',
 				name: 'mode',
 				type: 'options',
