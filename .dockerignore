@@ -1,0 +1,7 @@
+node_modules
+.git
+.github
+*.md
+.prettierrc.js
+eslint.config.mjs
+tsconfig.json
