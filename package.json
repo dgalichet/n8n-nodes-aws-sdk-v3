@@ -1,6 +1,6 @@
 {
     "name": "@dgalichet/n8n-nodes-aws-sdk-v3",
-    "version": "0.1.3",
+    "version": "0.1.4",
     "description": "n8n community node for executing custom JavaScript code with AWS SDK v3 clients (S3, Bedrock, SSM)",
     "license": "MIT",
     "homepage": "https://github.com/dgalichet/n8n-nodes-aws-sdk-v3",
@@ -27,7 +27,7 @@
         "lint": "n8n-node lint",
         "lint:fix": "n8n-node lint --fix",
         "release": "n8n-node release",
-        "prepublishOnly": "n8n-node prerelease"
+        "prepublishOnly": "n8n-node prerelease && rm -f dist/package.json dist/tsconfig.tsbuildinfo"
     },
     "files": [
         "dist"
