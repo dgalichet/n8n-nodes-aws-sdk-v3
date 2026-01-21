@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-aws-sdk-v3.awsCode",
+	"node": "@dgalichet/n8n-nodes-aws-sdk-v3.awsCode",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Development", "Developer Tools"],
