@@ -1,6 +1,6 @@
 # n8n-nodes-aws-sdk-v3
 
-This is an n8n community node that allows you to execute custom JavaScript code with pre-configured AWS SDK v3 clients (S3, Bedrock, SSM) in your n8n workflows.
+This is an n8n community node that allows you to execute custom JavaScript code with pre-configured AWS SDK v3 clients (S3, Bedrock, SSM, Secrets Manager) in your n8n workflows.
 
 **Note:** This node uses external dependencies (AWS SDK v3) and is only compatible with self-hosted n8n installations. It cannot be used on n8n Cloud.
 
@@ -33,6 +33,7 @@ The **AWS Code** node provides a code editor where you can write custom JavaScri
 - `$s3` - Amazon S3 Client
 - `$bedrock` - Amazon Bedrock Runtime Client
 - `$ssm` - AWS Systems Manager (SSM) Client
+- `$secretsManager` - AWS Secrets Manager Client
 
 ### Available AWS SDK Commands
 
@@ -61,6 +62,17 @@ The **AWS Code** node provides a code editor where you can write custom JavaScri
 - `DeleteParameterCommand`
 - `DeleteParametersCommand`
 
+**Secrets Manager Commands:**
+- `GetSecretValueCommand`
+- `BatchGetSecretValueCommand`
+- `PutSecretValueCommand`
+- `CreateSecretCommand`
+- `UpdateSecretCommand`
+- `DeleteSecretCommand`
+- `DescribeSecretCommand`
+- `ListSecretsCommand`
+- `RestoreSecretCommand`
+
 ### Execution Modes
 
 - **Run Once for All Items** - Execute the code once with access to all input items via `$items`
@@ -76,6 +88,8 @@ Create **AWS SDK V3 API** credentials with:
 | Secret Access Key | Your AWS Secret Access Key |
 | Region | AWS region (e.g., `eu-west-1`, `us-east-1`) |
 | Session Token | Optional - for temporary credentials (STS) |
+
+Credential testing uses AWS STS `GetCallerIdentity`, so credentials can validate even without S3-specific permissions.
 
 ## Compatibility
 
@@ -121,6 +135,21 @@ return [{
 }];
 ```
 
+### Example: Get a Secret Value
+
+```javascript
+const response = await $secretsManager.send(new GetSecretValueCommand({
+  SecretId: 'my/app/secret',
+}));
+
+if (response.SecretString) {
+  return [{ json: { secret: response.SecretString } }];
+}
+
+const secretBinaryBase64 = Buffer.from(response.SecretBinary).toString('base64');
+return [{ json: { secretBinaryBase64 } }];
+```
+
 ### Example: Upload to S3
 
 ```javascript
@@ -141,6 +170,7 @@ return [{ json: { success: true, etag: response.ETag } }];
 | `$s3` | Pre-configured S3Client |
 | `$bedrock` | Pre-configured BedrockRuntimeClient |
 | `$ssm` | Pre-configured SSMClient |
+| `$secretsManager` | Pre-configured SecretsManagerClient |
 | `$items` | All input items (array) |
 | `$item` | Current item (in "Run Once for Each Item" mode) |
 | `$itemIndex` | Current item index |
@@ -152,8 +182,15 @@ return [{ json: { success: true, etag: response.ETag } }];
 - [Amazon S3 Documentation](https://docs.aws.amazon.com/s3/)
 - [Amazon Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
 - [AWS Systems Manager Documentation](https://docs.aws.amazon.com/systems-manager/)
+- [AWS Secrets Manager Documentation](https://docs.aws.amazon.com/secretsmanager/)
 
 ## Version history
+
+### Unreleased
+
+- Added AWS Secrets Manager client support (`$secretsManager`)
+- Added key Secrets Manager commands to the runtime context
+- Updated credentials test to use STS `GetCallerIdentity`
 
 ### 0.1.0
 

@@ -13,11 +13,14 @@ import { NodeOperationError } from 'n8n-workflow';
 import { S3Client } from '@aws-sdk/client-s3';
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { SSMClient } from '@aws-sdk/client-ssm';
+import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
+import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
 
 // Re-export all commands for user code
 import * as S3Commands from '@aws-sdk/client-s3';
 import * as BedrockCommands from '@aws-sdk/client-bedrock-runtime';
 import * as SSMCommands from '@aws-sdk/client-ssm';
+import * as SecretsManagerCommands from '@aws-sdk/client-secrets-manager';
 
 interface AwsCredentials {
 	accessKeyId: string;
@@ -94,9 +97,12 @@ export class AwsCode implements INodeType {
 				};
 
 				try {
-					const s3Client = new S3Client(awsConfig);
-					await s3Client.send(new S3Commands.ListBucketsCommand({}));
-					s3Client.destroy();
+					const stsClient = new STSClient(awsConfig);
+					try {
+						await stsClient.send(new GetCallerIdentityCommand({}));
+					} finally {
+						stsClient.destroy();
+					}
 					return {
 						status: 'OK',
 						message: 'Connection successful!',
@@ -117,7 +123,8 @@ export class AwsCode implements INodeType {
 		icon: { light: 'file:aws.svg', dark: 'file:aws.dark.svg' },
 		group: ['transform'],
 		version: 1,
-		description: 'Execute custom JavaScript code with AWS SDK v3 clients (S3, Bedrock, SSM)',
+		description:
+			'Execute custom JavaScript code with AWS SDK v3 clients (S3, Bedrock, SSM, Secrets Manager)',
 		defaults: {
 			name: 'AWS Code',
 		},
@@ -137,8 +144,9 @@ export class AwsCode implements INodeType {
 				name: 'notice',
 				type: 'notice',
 				default: '',
-				description: '<strong>AWS Clients:</strong> $s3, $bedrock, $ssm<strong>Input Data:</strong> $items, $item, $itemIndex<strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ...<strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ...<strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ...<em>Version: 0.1.1</em>',
-			},
+				description:
+					'<strong>AWS Clients:</strong> $s3, $bedrock, $ssm, $secretsManager | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.1.6</em>',
+				},
 			{
 				displayName: 'Mode',
 				name: 'mode',
@@ -170,11 +178,13 @@ export class AwsCode implements INodeType {
 // - $s3: S3Client
 // - $bedrock: BedrockRuntimeClient
 // - $ssm: SSMClient
+// - $secretsManager: SecretsManagerClient
 //
 // Available AWS SDK commands:
 // - S3: ListBucketsCommand, GetObjectCommand, PutObjectCommand, etc.
 // - Bedrock: InvokeModelCommand, ConverseCommand, etc.
 // - SSM: GetParameterCommand, PutParameterCommand, etc.
+// - Secrets Manager: GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, etc.
 //
 // Input data:
 // - $items: All input items (in "Run Once for All Items" mode)
@@ -215,12 +225,14 @@ return $items;
 		const s3Client = new S3Client(awsConfig);
 		const bedrockClient = new BedrockRuntimeClient(awsConfig);
 		const ssmClient = new SSMClient(awsConfig);
+		const secretsManagerClient = new SecretsManagerClient(awsConfig);
 
 		// Create the execution context with all AWS commands available
 		const context = {
 			$s3: s3Client,
 			$bedrock: bedrockClient,
 			$ssm: ssmClient,
+			$secretsManager: secretsManagerClient,
 			// S3 Commands
 			ListBucketsCommand: S3Commands.ListBucketsCommand,
 			GetObjectCommand: S3Commands.GetObjectCommand,
@@ -243,6 +255,16 @@ return $items;
 			PutParameterCommand: SSMCommands.PutParameterCommand,
 			DeleteParameterCommand: SSMCommands.DeleteParameterCommand,
 			DeleteParametersCommand: SSMCommands.DeleteParametersCommand,
+			// Secrets Manager Commands
+			GetSecretValueCommand: SecretsManagerCommands.GetSecretValueCommand,
+			BatchGetSecretValueCommand: SecretsManagerCommands.BatchGetSecretValueCommand,
+			PutSecretValueCommand: SecretsManagerCommands.PutSecretValueCommand,
+			CreateSecretCommand: SecretsManagerCommands.CreateSecretCommand,
+			UpdateSecretCommand: SecretsManagerCommands.UpdateSecretCommand,
+			DeleteSecretCommand: SecretsManagerCommands.DeleteSecretCommand,
+			DescribeSecretCommand: SecretsManagerCommands.DescribeSecretCommand,
+			ListSecretsCommand: SecretsManagerCommands.ListSecretsCommand,
+			RestoreSecretCommand: SecretsManagerCommands.RestoreSecretCommand,
 		};
 
 		let returnData: INodeExecutionData[] = [];
@@ -296,6 +318,7 @@ return $items;
 			s3Client.destroy();
 			bedrockClient.destroy();
 			ssmClient.destroy();
+			secretsManagerClient.destroy();
 		}
 
 		return [returnData];
