@@ -22,6 +22,3 @@ npm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
-
-# Optional: lock file (si vous préférez ne pas le versionner)
-package-lock.json
