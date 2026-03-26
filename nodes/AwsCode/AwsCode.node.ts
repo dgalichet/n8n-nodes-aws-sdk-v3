@@ -8,7 +8,7 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeOperationError } from 'n8n-workflow';
+import { ApplicationError, NodeOperationError } from 'n8n-workflow';
 
 import { S3Client } from '@aws-sdk/client-s3';
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
@@ -27,6 +27,37 @@ interface AwsCredentials {
 	secretAccessKey: string;
 	sessionToken?: string;
 	region: string;
+}
+
+type SupportedUserModule =
+	| 'crypto'
+	| 'node:crypto'
+	| 'lodash'
+	| 'luxon'
+	| 'uuid';
+
+declare function require(moduleName: string): unknown;
+
+const supportedUserModules: Record<SupportedUserModule, unknown> = {
+	crypto: require('crypto'),
+	'node:crypto': require('crypto'),
+	lodash: require('lodash'),
+	luxon: require('luxon'),
+	uuid: require('uuid'),
+};
+
+function createRestrictedRequire(): (moduleName: string) => unknown {
+	return (moduleName: string): unknown => {
+		if (!(moduleName in supportedUserModules)) {
+			throw new ApplicationError(
+				`Module "${moduleName}" is not available. Allowed modules: ${Object.keys(
+					supportedUserModules,
+				).join(', ')}`,
+			);
+		}
+
+		return supportedUserModules[moduleName as SupportedUserModule];
+	};
 }
 
 // Helper function to execute user code with context
@@ -145,7 +176,7 @@ export class AwsCode implements INodeType {
 				type: 'notice',
 				default: '',
 				description:
-					'<strong>AWS Clients:</strong> $s3, $bedrock, $ssm, $secretsManager | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.1.6</em>',
+					'<strong>AWS Clients:</strong> $s3, $bedrock, $ssm, $secretsManager | <strong>Node.js:</strong> require(\'crypto\'), require(\'node:crypto\'), require(\'lodash\'), require(\'luxon\'), require(\'uuid\') | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.1.6</em>',
 				},
 			{
 				displayName: 'Mode',
@@ -179,6 +210,13 @@ export class AwsCode implements INodeType {
 // - $bedrock: BedrockRuntimeClient
 // - $ssm: SSMClient
 // - $secretsManager: SecretsManagerClient
+//
+// Available Node.js require (whitelisted modules only):
+// - const crypto = require('crypto');
+// - const crypto = require('node:crypto');
+// - const _ = require('lodash');
+// - const { DateTime } = require('luxon');
+// - const { v4: uuidv4 } = require('uuid');
 //
 // Available AWS SDK commands:
 // - S3: ListBucketsCommand, GetObjectCommand, PutObjectCommand, etc.
@@ -233,6 +271,8 @@ return $items;
 			$bedrock: bedrockClient,
 			$ssm: ssmClient,
 			$secretsManager: secretsManagerClient,
+			crypto: supportedUserModules.crypto,
+			require: createRestrictedRequire(),
 			// S3 Commands
 			ListBucketsCommand: S3Commands.ListBucketsCommand,
 			GetObjectCommand: S3Commands.GetObjectCommand,

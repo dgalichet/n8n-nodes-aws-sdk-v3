@@ -163,6 +163,44 @@ const response = await $s3.send(new PutObjectCommand({
 return [{ json: { success: true, etag: response.ETag } }];
 ```
 
+### Example: Use Built-in Helper Libraries
+
+The AWS Code node exposes a restricted `require()` with these allowed modules:
+
+- `crypto`
+- `node:crypto`
+- `lodash`
+- `luxon`
+- `uuid`
+
+```javascript
+const crypto = require('crypto');
+const _ = require('lodash');
+const { DateTime } = require('luxon');
+const { v4: uuidv4 } = require('uuid');
+
+const payload = {
+  userId: $item.json.userId,
+  email: $item.json.email,
+  roles: $item.json.roles ?? [],
+};
+
+const normalizedPayload = _.pick(payload, ['userId', 'email', 'roles']);
+const digest = crypto
+  .createHash('sha256')
+  .update(JSON.stringify(normalizedPayload))
+  .digest('hex');
+
+return [{
+  json: {
+    id: uuidv4(),
+    processedAt: DateTime.now().toISO(),
+    digest,
+    roleCount: _.size(normalizedPayload.roles),
+  }
+}];
+```
+
 ### Available Variables
 
 | Variable | Description |
@@ -171,6 +209,8 @@ return [{ json: { success: true, etag: response.ETag } }];
 | `$bedrock` | Pre-configured BedrockRuntimeClient |
 | `$ssm` | Pre-configured SSMClient |
 | `$secretsManager` | Pre-configured SecretsManagerClient |
+| `require` | Restricted `require()` for allowed modules (`crypto`, `node:crypto`, `lodash`, `luxon`, `uuid`) |
+| `crypto` | Shortcut to the Node.js crypto module |
 | `$items` | All input items (array) |
 | `$item` | Current item (in "Run Once for Each Item" mode) |
 | `$itemIndex` | Current item index |
@@ -190,6 +230,7 @@ return [{ json: { success: true, etag: response.ETag } }];
 
 - Added AWS Secrets Manager client support (`$secretsManager`)
 - Added key Secrets Manager commands to the runtime context
+- Added restricted `require()` support for `crypto`, `lodash`, `luxon`, and `uuid`
 - Updated credentials test to use STS `GetCallerIdentity`
 
 ### 0.1.0
