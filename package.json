@@ -1,6 +1,6 @@
 {
     "name": "@dgalichet/n8n-nodes-aws-sdk-v3",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "n8n community node for executing custom JavaScript code with AWS SDK v3 clients (S3, Bedrock, SSM, Secrets Manager)",
     "license": "MIT",
     "homepage": "https://github.com/dgalichet/n8n-nodes-aws-sdk-v3",
