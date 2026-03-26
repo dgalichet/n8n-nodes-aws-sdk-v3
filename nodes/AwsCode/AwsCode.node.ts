@@ -176,7 +176,7 @@ export class AwsCode implements INodeType {
 				type: 'notice',
 				default: '',
 				description:
-					'<strong>AWS Clients:</strong> $s3, $bedrock, $ssm, $secretsManager | <strong>Node.js:</strong> require(\'crypto\'), require(\'node:crypto\'), require(\'lodash\'), require(\'luxon\'), require(\'uuid\') | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.1.6</em>',
+					'<strong>AWS Clients:</strong> $s3, $bedrock, $ssm, $secretsManager | <strong>n8n Variables:</strong> $vars | <strong>Node.js:</strong> require(\'crypto\'), require(\'node:crypto\'), require(\'lodash\'), require(\'luxon\'), require(\'uuid\') | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.1.6</em>',
 				},
 			{
 				displayName: 'Mode',
@@ -210,6 +210,7 @@ export class AwsCode implements INodeType {
 // - $bedrock: BedrockRuntimeClient
 // - $ssm: SSMClient
 // - $secretsManager: SecretsManagerClient
+// - $vars: n8n workflow variables
 //
 // Available Node.js require (whitelisted modules only):
 // - const crypto = require('crypto');
@@ -265,46 +266,52 @@ return $items;
 		const ssmClient = new SSMClient(awsConfig);
 		const secretsManagerClient = new SecretsManagerClient(awsConfig);
 
-		// Create the execution context with all AWS commands available
-		const context = {
-			$s3: s3Client,
-			$bedrock: bedrockClient,
-			$ssm: ssmClient,
-			$secretsManager: secretsManagerClient,
-			crypto: supportedUserModules.crypto,
-			require: createRestrictedRequire(),
-			// S3 Commands
-			ListBucketsCommand: S3Commands.ListBucketsCommand,
-			GetObjectCommand: S3Commands.GetObjectCommand,
-			PutObjectCommand: S3Commands.PutObjectCommand,
-			DeleteObjectCommand: S3Commands.DeleteObjectCommand,
-			CopyObjectCommand: S3Commands.CopyObjectCommand,
-			HeadObjectCommand: S3Commands.HeadObjectCommand,
-			ListObjectsV2Command: S3Commands.ListObjectsV2Command,
-			CreateBucketCommand: S3Commands.CreateBucketCommand,
-			DeleteBucketCommand: S3Commands.DeleteBucketCommand,
-			// Bedrock Commands
-			InvokeModelCommand: BedrockCommands.InvokeModelCommand,
-			InvokeModelWithResponseStreamCommand: BedrockCommands.InvokeModelWithResponseStreamCommand,
-			ConverseCommand: BedrockCommands.ConverseCommand,
-			ConverseStreamCommand: BedrockCommands.ConverseStreamCommand,
-			// SSM Commands
-			GetParameterCommand: SSMCommands.GetParameterCommand,
-			GetParametersCommand: SSMCommands.GetParametersCommand,
-			GetParametersByPathCommand: SSMCommands.GetParametersByPathCommand,
-			PutParameterCommand: SSMCommands.PutParameterCommand,
-			DeleteParameterCommand: SSMCommands.DeleteParameterCommand,
-			DeleteParametersCommand: SSMCommands.DeleteParametersCommand,
-			// Secrets Manager Commands
-			GetSecretValueCommand: SecretsManagerCommands.GetSecretValueCommand,
-			BatchGetSecretValueCommand: SecretsManagerCommands.BatchGetSecretValueCommand,
-			PutSecretValueCommand: SecretsManagerCommands.PutSecretValueCommand,
-			CreateSecretCommand: SecretsManagerCommands.CreateSecretCommand,
-			UpdateSecretCommand: SecretsManagerCommands.UpdateSecretCommand,
-			DeleteSecretCommand: SecretsManagerCommands.DeleteSecretCommand,
-			DescribeSecretCommand: SecretsManagerCommands.DescribeSecretCommand,
-			ListSecretsCommand: SecretsManagerCommands.ListSecretsCommand,
-			RestoreSecretCommand: SecretsManagerCommands.RestoreSecretCommand,
+		const createExecutionContext = (itemIndex: number) => {
+			const workflowDataProxy = this.getWorkflowDataProxy(itemIndex);
+
+			// Create the execution context with AWS commands and selected n8n variables
+			return {
+				$s3: s3Client,
+				$bedrock: bedrockClient,
+				$ssm: ssmClient,
+				$secretsManager: secretsManagerClient,
+				$vars: workflowDataProxy.$vars,
+				crypto: supportedUserModules.crypto,
+				require: createRestrictedRequire(),
+				// S3 Commands
+				ListBucketsCommand: S3Commands.ListBucketsCommand,
+				GetObjectCommand: S3Commands.GetObjectCommand,
+				PutObjectCommand: S3Commands.PutObjectCommand,
+				DeleteObjectCommand: S3Commands.DeleteObjectCommand,
+				CopyObjectCommand: S3Commands.CopyObjectCommand,
+				HeadObjectCommand: S3Commands.HeadObjectCommand,
+				ListObjectsV2Command: S3Commands.ListObjectsV2Command,
+				CreateBucketCommand: S3Commands.CreateBucketCommand,
+				DeleteBucketCommand: S3Commands.DeleteBucketCommand,
+				// Bedrock Commands
+				InvokeModelCommand: BedrockCommands.InvokeModelCommand,
+				InvokeModelWithResponseStreamCommand:
+					BedrockCommands.InvokeModelWithResponseStreamCommand,
+				ConverseCommand: BedrockCommands.ConverseCommand,
+				ConverseStreamCommand: BedrockCommands.ConverseStreamCommand,
+				// SSM Commands
+				GetParameterCommand: SSMCommands.GetParameterCommand,
+				GetParametersCommand: SSMCommands.GetParametersCommand,
+				GetParametersByPathCommand: SSMCommands.GetParametersByPathCommand,
+				PutParameterCommand: SSMCommands.PutParameterCommand,
+				DeleteParameterCommand: SSMCommands.DeleteParameterCommand,
+				DeleteParametersCommand: SSMCommands.DeleteParametersCommand,
+				// Secrets Manager Commands
+				GetSecretValueCommand: SecretsManagerCommands.GetSecretValueCommand,
+				BatchGetSecretValueCommand: SecretsManagerCommands.BatchGetSecretValueCommand,
+				PutSecretValueCommand: SecretsManagerCommands.PutSecretValueCommand,
+				CreateSecretCommand: SecretsManagerCommands.CreateSecretCommand,
+				UpdateSecretCommand: SecretsManagerCommands.UpdateSecretCommand,
+				DeleteSecretCommand: SecretsManagerCommands.DeleteSecretCommand,
+				DescribeSecretCommand: SecretsManagerCommands.DescribeSecretCommand,
+				ListSecretsCommand: SecretsManagerCommands.ListSecretsCommand,
+				RestoreSecretCommand: SecretsManagerCommands.RestoreSecretCommand,
+			};
 		};
 
 		let returnData: INodeExecutionData[] = [];
@@ -313,7 +320,7 @@ return $items;
 			if (mode === 'runOnceForAllItems') {
 				// Run once with all items
 				const result = await executeUserCode(code, {
-					...context,
+					...createExecutionContext(0),
 					$items: items,
 					$item: items[0],
 					$itemIndex: 0,
@@ -324,7 +331,7 @@ return $items;
 				for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 					try {
 						const result = await executeUserCode(code, {
-							...context,
+							...createExecutionContext(itemIndex),
 							$items: items,
 							$item: items[itemIndex],
 							$itemIndex: itemIndex,

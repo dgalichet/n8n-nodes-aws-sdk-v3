@@ -201,6 +201,20 @@ return [{
 }];
 ```
 
+### Example: Use n8n Workflow Variables
+
+```javascript
+const bucketName = $vars.AWS_BUCKET_NAME;
+const environment = $vars.APP_ENV ?? 'dev';
+
+return [{
+  json: {
+    bucketName,
+    environment,
+  }
+}];
+```
+
 ### Available Variables
 
 | Variable | Description |
@@ -209,6 +223,7 @@ return [{
 | `$bedrock` | Pre-configured BedrockRuntimeClient |
 | `$ssm` | Pre-configured SSMClient |
 | `$secretsManager` | Pre-configured SecretsManagerClient |
+| `$vars` | n8n workflow variables |
 | `require` | Restricted `require()` for allowed modules (`crypto`, `node:crypto`, `lodash`, `luxon`, `uuid`) |
 | `crypto` | Shortcut to the Node.js crypto module |
 | `$items` | All input items (array) |
@@ -230,6 +245,7 @@ return [{
 
 - Added AWS Secrets Manager client support (`$secretsManager`)
 - Added key Secrets Manager commands to the runtime context
+- Added `$vars` support for n8n workflow variables
 - Added restricted `require()` support for `crypto`, `lodash`, `luxon`, and `uuid`
 - Updated credentials test to use STS `GetCallerIdentity`
 
