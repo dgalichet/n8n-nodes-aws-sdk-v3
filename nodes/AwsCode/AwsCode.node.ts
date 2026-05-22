@@ -24,6 +24,8 @@ interface AwsConfig {
 		secretAccessKey: string;
 		sessionToken?: string;
 	};
+	maxAttempts?: number;
+	requestHandler?: unknown;
 }
 
 interface AwsClientLike {
@@ -46,7 +48,17 @@ type AwsSdkModuleName =
 	| '@aws-sdk/client-kms'
 	| '@aws-sdk/client-ssm'
 	| '@aws-sdk/client-secrets-manager'
-	| '@aws-sdk/client-sts';
+	| '@aws-sdk/client-sts'
+	| '@smithy/node-http-handler';
+
+interface AwsClientOptions {
+	connectionTimeoutMs?: number;
+	requestTimeoutMs?: number;
+	socketTimeoutMs?: number;
+}
+
+const DEFAULT_AWS_CONNECTION_TIMEOUT_MS = 10_000;
+const DEFAULT_SHORT_AWS_REQUEST_TIMEOUT_MS = 10_000;
 
 const supportedUserModules: Record<SupportedUserModule, unknown> = {
 	crypto: require('crypto'),
@@ -78,10 +90,36 @@ function getAwsSdkExport<T>(
 	return exportedValue as T;
 }
 
+function createAwsRequestHandler(options: AwsClientOptions): unknown {
+	const { NodeHttpHandler } = loadAwsSdkModule<{
+		NodeHttpHandler: new (handlerOptions: Record<string, unknown>) => unknown;
+	}>('@smithy/node-http-handler');
+
+	return new NodeHttpHandler({
+		connectionTimeout:
+			options.connectionTimeoutMs ?? DEFAULT_AWS_CONNECTION_TIMEOUT_MS,
+		requestTimeout: options.requestTimeoutMs,
+		socketTimeout: options.socketTimeoutMs,
+		throwOnRequestTimeout: options.requestTimeoutMs !== undefined,
+	});
+}
+
+function createAwsClientConfig(
+	awsConfig: AwsConfig,
+	options: AwsClientOptions = {},
+): AwsConfig {
+	return {
+		...awsConfig,
+		maxAttempts: 3,
+		requestHandler: createAwsRequestHandler(options),
+	};
+}
+
 function createLazyAwsClient(
 	moduleName: AwsSdkModuleName,
 	clientExportName: string,
 	awsConfig: AwsConfig,
+	options: AwsClientOptions = {},
 ): { client: AwsClientLike; destroy(): void } {
 	let client: AwsClientLike | undefined;
 
@@ -90,7 +128,7 @@ function createLazyAwsClient(
 			const ClientConstructor = getAwsSdkExport<new (
 				config: AwsConfig,
 			) => AwsClientLike>(moduleName, clientExportName);
-			client = new ClientConstructor(awsConfig);
+			client = new ClientConstructor(createAwsClientConfig(awsConfig, options));
 		}
 
 		return client;
@@ -221,7 +259,12 @@ export class AwsCode implements INodeType {
 						loadAwsSdkModule<typeof import('@aws-sdk/client-sts')>(
 							'@aws-sdk/client-sts',
 						);
-					const stsClient = new STSClient(awsConfig);
+					const stsClient = new STSClient(
+						createAwsClientConfig(awsConfig, {
+							requestTimeoutMs: DEFAULT_SHORT_AWS_REQUEST_TIMEOUT_MS,
+							socketTimeoutMs: DEFAULT_SHORT_AWS_REQUEST_TIMEOUT_MS,
+						}) as NonNullable<ConstructorParameters<typeof STSClient>[0]>,
+					);
 					try {
 						await stsClient.send(new GetCallerIdentityCommand({}));
 					} finally {
@@ -371,6 +414,10 @@ return $items;
 			'@aws-sdk/client-kms',
 			'KMSClient',
 			awsConfig,
+			{
+				requestTimeoutMs: DEFAULT_SHORT_AWS_REQUEST_TIMEOUT_MS,
+				socketTimeoutMs: DEFAULT_SHORT_AWS_REQUEST_TIMEOUT_MS,
+			},
 		);
 		const ssmClient = createLazyAwsClient(
 			'@aws-sdk/client-ssm',
