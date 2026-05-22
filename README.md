@@ -1,6 +1,6 @@
 # n8n-nodes-aws-sdk-v3
 
-This is an n8n community node that allows you to execute custom JavaScript code with pre-configured AWS SDK v3 clients (S3, Bedrock, SSM, Secrets Manager) in your n8n workflows.
+This is an n8n community node that allows you to execute custom JavaScript code with pre-configured AWS SDK v3 clients (S3, Bedrock, KMS, SSM, Secrets Manager) in your n8n workflows.
 
 **Note:** This node uses external dependencies (AWS SDK v3) and is only compatible with self-hosted n8n installations. It cannot be used on n8n Cloud.
 
@@ -32,6 +32,7 @@ The **AWS Code** node provides a code editor where you can write custom JavaScri
 
 - `$s3` - Amazon S3 Client
 - `$bedrock` - Amazon Bedrock Runtime Client
+- `$kms` - AWS Key Management Service (KMS) Client
 - `$ssm` - AWS Systems Manager (SSM) Client
 - `$secretsManager` - AWS Secrets Manager Client
 
@@ -53,6 +54,32 @@ The **AWS Code** node provides a code editor where you can write custom JavaScri
 - `InvokeModelWithResponseStreamCommand`
 - `ConverseCommand`
 - `ConverseStreamCommand`
+
+**KMS Commands:**
+- `EncryptCommand`
+- `DecryptCommand`
+- `ReEncryptCommand`
+- `GenerateDataKeyCommand`
+- `GenerateDataKeyWithoutPlaintextCommand`
+- `GenerateRandomCommand`
+- `DescribeKeyCommand`
+- `ListKeysCommand`
+- `ListAliasesCommand`
+- `GetPublicKeyCommand`
+- `SignCommand`
+- `VerifyCommand`
+- `GenerateMacCommand`
+- `VerifyMacCommand`
+- `CreateKeyCommand`
+- `CreateAliasCommand`
+- `UpdateAliasCommand`
+- `DeleteAliasCommand`
+- `EnableKeyCommand`
+- `DisableKeyCommand`
+- `ScheduleKeyDeletionCommand`
+- `CancelKeyDeletionCommand`
+- `TagResourceCommand`
+- `UntagResourceCommand`
 
 **SSM Commands:**
 - `GetParameterCommand`
@@ -150,6 +177,23 @@ const secretBinaryBase64 = Buffer.from(response.SecretBinary).toString('base64')
 return [{ json: { secretBinaryBase64 } }];
 ```
 
+### Example: Encrypt Data with KMS
+
+```javascript
+const plaintext = Buffer.from($item.json.value, 'utf8');
+
+const response = await $kms.send(new EncryptCommand({
+  KeyId: $vars.KMS_KEY_ID,
+  Plaintext: plaintext,
+}));
+
+return [{
+  json: {
+    ciphertextBase64: Buffer.from(response.CiphertextBlob).toString('base64'),
+  }
+}];
+```
+
 ### Example: Upload to S3
 
 ```javascript
@@ -221,6 +265,7 @@ return [{
 |----------|-------------|
 | `$s3` | Pre-configured S3Client |
 | `$bedrock` | Pre-configured BedrockRuntimeClient |
+| `$kms` | Pre-configured KMSClient |
 | `$ssm` | Pre-configured SSMClient |
 | `$secretsManager` | Pre-configured SecretsManagerClient |
 | `$vars` | n8n workflow variables |
@@ -236,6 +281,7 @@ return [{
 - [AWS SDK for JavaScript v3 Documentation](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/)
 - [Amazon S3 Documentation](https://docs.aws.amazon.com/s3/)
 - [Amazon Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- [AWS Key Management Service Documentation](https://docs.aws.amazon.com/kms/)
 - [AWS Systems Manager Documentation](https://docs.aws.amazon.com/systems-manager/)
 - [AWS Secrets Manager Documentation](https://docs.aws.amazon.com/secretsmanager/)
 
@@ -243,6 +289,8 @@ return [{
 
 ### Unreleased
 
+- Added AWS KMS client support (`$kms`)
+- Added key KMS commands to the runtime context
 - Added AWS Secrets Manager client support (`$secretsManager`)
 - Added key Secrets Manager commands to the runtime context
 - Added `$vars` support for n8n workflow variables

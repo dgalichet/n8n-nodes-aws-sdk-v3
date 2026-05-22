@@ -12,6 +12,7 @@ import { ApplicationError, NodeOperationError } from 'n8n-workflow';
 
 import { S3Client } from '@aws-sdk/client-s3';
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
+import { KMSClient } from '@aws-sdk/client-kms';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
 import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
@@ -19,6 +20,7 @@ import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
 // Re-export all commands for user code
 import * as S3Commands from '@aws-sdk/client-s3';
 import * as BedrockCommands from '@aws-sdk/client-bedrock-runtime';
+import * as KMSCommands from '@aws-sdk/client-kms';
 import * as SSMCommands from '@aws-sdk/client-ssm';
 import * as SecretsManagerCommands from '@aws-sdk/client-secrets-manager';
 
@@ -155,7 +157,7 @@ export class AwsCode implements INodeType {
 		group: ['transform'],
 		version: 1,
 		description:
-			'Execute custom JavaScript code with AWS SDK v3 clients (S3, Bedrock, SSM, Secrets Manager)',
+			'Execute custom JavaScript code with AWS SDK v3 clients (S3, Bedrock, KMS, SSM, Secrets Manager)',
 		defaults: {
 			name: 'AWS Code',
 		},
@@ -176,7 +178,7 @@ export class AwsCode implements INodeType {
 				type: 'notice',
 				default: '',
 				description:
-					'<strong>AWS Clients:</strong> $s3, $bedrock, $ssm, $secretsManager | <strong>n8n Variables:</strong> $vars | <strong>Node.js:</strong> require(\'crypto\'), require(\'node:crypto\'), require(\'lodash\'), require(\'luxon\'), require(\'uuid\') | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.1.6</em>',
+					'<strong>AWS Clients:</strong> $s3, $bedrock, $kms, $ssm, $secretsManager | <strong>n8n Variables:</strong> $vars | <strong>Node.js:</strong> require(\'crypto\'), require(\'node:crypto\'), require(\'lodash\'), require(\'luxon\'), require(\'uuid\') | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>KMS:</strong> EncryptCommand, DecryptCommand, GenerateDataKeyCommand, DescribeKeyCommand, ListKeysCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.4.0</em>',
 				},
 			{
 				displayName: 'Mode',
@@ -208,6 +210,7 @@ export class AwsCode implements INodeType {
 				default: `// Available AWS clients (pre-configured with your credentials):
 // - $s3: S3Client
 // - $bedrock: BedrockRuntimeClient
+// - $kms: KMSClient
 // - $ssm: SSMClient
 // - $secretsManager: SecretsManagerClient
 // - $vars: n8n workflow variables
@@ -222,6 +225,7 @@ export class AwsCode implements INodeType {
 // Available AWS SDK commands:
 // - S3: ListBucketsCommand, GetObjectCommand, PutObjectCommand, etc.
 // - Bedrock: InvokeModelCommand, ConverseCommand, etc.
+// - KMS: EncryptCommand, DecryptCommand, GenerateDataKeyCommand, DescribeKeyCommand, etc.
 // - SSM: GetParameterCommand, PutParameterCommand, etc.
 // - Secrets Manager: GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, etc.
 //
@@ -263,6 +267,7 @@ return $items;
 		// Initialize AWS clients
 		const s3Client = new S3Client(awsConfig);
 		const bedrockClient = new BedrockRuntimeClient(awsConfig);
+		const kmsClient = new KMSClient(awsConfig);
 		const ssmClient = new SSMClient(awsConfig);
 		const secretsManagerClient = new SecretsManagerClient(awsConfig);
 
@@ -273,6 +278,7 @@ return $items;
 			return {
 				$s3: s3Client,
 				$bedrock: bedrockClient,
+				$kms: kmsClient,
 				$ssm: ssmClient,
 				$secretsManager: secretsManagerClient,
 				$vars: workflowDataProxy.$vars,
@@ -294,6 +300,32 @@ return $items;
 					BedrockCommands.InvokeModelWithResponseStreamCommand,
 				ConverseCommand: BedrockCommands.ConverseCommand,
 				ConverseStreamCommand: BedrockCommands.ConverseStreamCommand,
+				// KMS Commands
+				EncryptCommand: KMSCommands.EncryptCommand,
+				DecryptCommand: KMSCommands.DecryptCommand,
+				ReEncryptCommand: KMSCommands.ReEncryptCommand,
+				GenerateDataKeyCommand: KMSCommands.GenerateDataKeyCommand,
+				GenerateDataKeyWithoutPlaintextCommand:
+					KMSCommands.GenerateDataKeyWithoutPlaintextCommand,
+				GenerateRandomCommand: KMSCommands.GenerateRandomCommand,
+				DescribeKeyCommand: KMSCommands.DescribeKeyCommand,
+				ListKeysCommand: KMSCommands.ListKeysCommand,
+				ListAliasesCommand: KMSCommands.ListAliasesCommand,
+				GetPublicKeyCommand: KMSCommands.GetPublicKeyCommand,
+				SignCommand: KMSCommands.SignCommand,
+				VerifyCommand: KMSCommands.VerifyCommand,
+				GenerateMacCommand: KMSCommands.GenerateMacCommand,
+				VerifyMacCommand: KMSCommands.VerifyMacCommand,
+				CreateKeyCommand: KMSCommands.CreateKeyCommand,
+				CreateAliasCommand: KMSCommands.CreateAliasCommand,
+				UpdateAliasCommand: KMSCommands.UpdateAliasCommand,
+				DeleteAliasCommand: KMSCommands.DeleteAliasCommand,
+				EnableKeyCommand: KMSCommands.EnableKeyCommand,
+				DisableKeyCommand: KMSCommands.DisableKeyCommand,
+				ScheduleKeyDeletionCommand: KMSCommands.ScheduleKeyDeletionCommand,
+				CancelKeyDeletionCommand: KMSCommands.CancelKeyDeletionCommand,
+				TagResourceCommand: KMSCommands.TagResourceCommand,
+				UntagResourceCommand: KMSCommands.UntagResourceCommand,
 				// SSM Commands
 				GetParameterCommand: SSMCommands.GetParameterCommand,
 				GetParametersCommand: SSMCommands.GetParametersCommand,
@@ -364,6 +396,7 @@ return $items;
 			// Clean up clients
 			s3Client.destroy();
 			bedrockClient.destroy();
+			kmsClient.destroy();
 			ssmClient.destroy();
 			secretsManagerClient.destroy();
 		}
