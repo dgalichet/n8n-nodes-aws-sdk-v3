@@ -10,25 +10,25 @@ import type {
 } from 'n8n-workflow';
 import { ApplicationError, NodeOperationError } from 'n8n-workflow';
 
-import { S3Client } from '@aws-sdk/client-s3';
-import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
-import { KMSClient } from '@aws-sdk/client-kms';
-import { SSMClient } from '@aws-sdk/client-ssm';
-import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager';
-import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
-
-// Re-export all commands for user code
-import * as S3Commands from '@aws-sdk/client-s3';
-import * as BedrockCommands from '@aws-sdk/client-bedrock-runtime';
-import * as KMSCommands from '@aws-sdk/client-kms';
-import * as SSMCommands from '@aws-sdk/client-ssm';
-import * as SecretsManagerCommands from '@aws-sdk/client-secrets-manager';
-
 interface AwsCredentials {
 	accessKeyId: string;
 	secretAccessKey: string;
 	sessionToken?: string;
 	region: string;
+}
+
+interface AwsConfig {
+	region: string;
+	credentials: {
+		accessKeyId: string;
+		secretAccessKey: string;
+		sessionToken?: string;
+	};
+}
+
+interface AwsClientLike {
+	destroy(): void;
+	send(command: unknown): Promise<unknown>;
 }
 
 type SupportedUserModule =
@@ -40,6 +40,14 @@ type SupportedUserModule =
 
 declare function require(moduleName: string): unknown;
 
+type AwsSdkModuleName =
+	| '@aws-sdk/client-s3'
+	| '@aws-sdk/client-bedrock-runtime'
+	| '@aws-sdk/client-kms'
+	| '@aws-sdk/client-ssm'
+	| '@aws-sdk/client-secrets-manager'
+	| '@aws-sdk/client-sts';
+
 const supportedUserModules: Record<SupportedUserModule, unknown> = {
 	crypto: require('crypto'),
 	'node:crypto': require('crypto'),
@@ -47,6 +55,85 @@ const supportedUserModules: Record<SupportedUserModule, unknown> = {
 	luxon: require('luxon'),
 	uuid: require('uuid'),
 };
+
+function loadAwsSdkModule<T extends Record<string, unknown>>(
+	moduleName: AwsSdkModuleName,
+): T {
+	return require(moduleName) as T;
+}
+
+function getAwsSdkExport<T>(
+	moduleName: AwsSdkModuleName,
+	exportName: string,
+): T {
+	const awsModule = loadAwsSdkModule(moduleName);
+	const exportedValue = awsModule[exportName];
+
+	if (exportedValue === undefined) {
+		throw new ApplicationError(
+			`AWS SDK export "${exportName}" is not available from ${moduleName}.`,
+		);
+	}
+
+	return exportedValue as T;
+}
+
+function createLazyAwsClient(
+	moduleName: AwsSdkModuleName,
+	clientExportName: string,
+	awsConfig: AwsConfig,
+): { client: AwsClientLike; destroy(): void } {
+	let client: AwsClientLike | undefined;
+
+	const getClient = (): AwsClientLike => {
+		if (!client) {
+			const ClientConstructor = getAwsSdkExport<new (
+				config: AwsConfig,
+			) => AwsClientLike>(moduleName, clientExportName);
+			client = new ClientConstructor(awsConfig);
+		}
+
+		return client;
+	};
+
+	const clientProxy = new Proxy(
+		{},
+		{
+			get(_target, property) {
+				const resolvedClient = getClient() as unknown as Record<
+					PropertyKey,
+					unknown
+				>;
+				const value = resolvedClient[property];
+
+				if (typeof value === 'function') {
+					return value.bind(resolvedClient);
+				}
+
+				return value;
+			},
+		},
+	) as AwsClientLike;
+
+	return {
+		client: clientProxy,
+		destroy() {
+			client?.destroy();
+		},
+	};
+}
+
+function createLazyAwsCommand(
+	moduleName: AwsSdkModuleName,
+	commandExportName: string,
+): new (input: unknown) => unknown {
+	return function LazyAwsCommand(input: unknown): unknown {
+		const CommandConstructor = getAwsSdkExport<new (
+			input: unknown,
+		) => unknown>(moduleName, commandExportName);
+		return new CommandConstructor(input);
+	} as unknown as new (input: unknown) => unknown;
+}
 
 function createRestrictedRequire(): (moduleName: string) => unknown {
 	return (moduleName: string): unknown => {
@@ -120,7 +207,7 @@ export class AwsCode implements INodeType {
 				credential: ICredentialsDecrypted,
 			): Promise<INodeCredentialTestResult> {
 				const credentials = credential.data as unknown as AwsCredentials;
-				const awsConfig = {
+				const awsConfig: AwsConfig = {
 					region: credentials.region,
 					credentials: {
 						accessKeyId: credentials.accessKeyId,
@@ -130,6 +217,10 @@ export class AwsCode implements INodeType {
 				};
 
 				try {
+					const { STSClient, GetCallerIdentityCommand } =
+						loadAwsSdkModule<typeof import('@aws-sdk/client-sts')>(
+							'@aws-sdk/client-sts',
+						);
 					const stsClient = new STSClient(awsConfig);
 					try {
 						await stsClient.send(new GetCallerIdentityCommand({}));
@@ -178,7 +269,7 @@ export class AwsCode implements INodeType {
 				type: 'notice',
 				default: '',
 				description:
-					'<strong>AWS Clients:</strong> $s3, $bedrock, $kms, $ssm, $secretsManager | <strong>n8n Variables:</strong> $vars | <strong>Node.js:</strong> require(\'crypto\'), require(\'node:crypto\'), require(\'lodash\'), require(\'luxon\'), require(\'uuid\') | <strong>Input Data:</strong> $items, $item, $itemIndex | <strong>S3:</strong> ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | <strong>Bedrock:</strong> InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | <strong>KMS:</strong> EncryptCommand, DecryptCommand, GenerateDataKeyCommand, DescribeKeyCommand, ListKeysCommand, ... | <strong>SSM:</strong> GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | <strong>Secrets Manager:</strong> GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ... | <em>Version: 0.5.1</em>',
+					'AWS Clients: $s3, $bedrock, $kms, $ssm, $secretsManager | n8n Variables: $vars | Node.js: require(\'crypto\'), require(\'node:crypto\'), require(\'lodash\'), require(\'luxon\'), require(\'uuid\') | Input Data: $items, $item, $itemIndex | S3: ListBucketsCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, ... | Bedrock: InvokeModelCommand, ConverseCommand, ConverseStreamCommand, ... | KMS: EncryptCommand, DecryptCommand, GenerateDataKeyCommand, DescribeKeyCommand, ListKeysCommand, ... | SSM: GetParameterCommand, PutParameterCommand, GetParametersByPathCommand, ... | Secrets Manager: GetSecretValueCommand, PutSecretValueCommand, CreateSecretCommand, ...',
 				},
 			{
 				displayName: 'Mode',
@@ -255,7 +346,7 @@ return $items;
 		const credentials = (await this.getCredentials('awsSdkV3Api')) as AwsCredentials;
 
 		// Create AWS SDK v3 configuration
-		const awsConfig = {
+		const awsConfig: AwsConfig = {
 			region: credentials.region,
 			credentials: {
 				accessKeyId: credentials.accessKeyId,
@@ -264,85 +355,260 @@ return $items;
 			},
 		};
 
-		// Initialize AWS clients
-		const s3Client = new S3Client(awsConfig);
-		const bedrockClient = new BedrockRuntimeClient(awsConfig);
-		const kmsClient = new KMSClient(awsConfig);
-		const ssmClient = new SSMClient(awsConfig);
-		const secretsManagerClient = new SecretsManagerClient(awsConfig);
+		// Initialize AWS clients lazily so n8n can load the node even if an
+		// unused AWS SDK package has a bad install tree.
+		const s3Client = createLazyAwsClient(
+			'@aws-sdk/client-s3',
+			'S3Client',
+			awsConfig,
+		);
+		const bedrockClient = createLazyAwsClient(
+			'@aws-sdk/client-bedrock-runtime',
+			'BedrockRuntimeClient',
+			awsConfig,
+		);
+		const kmsClient = createLazyAwsClient(
+			'@aws-sdk/client-kms',
+			'KMSClient',
+			awsConfig,
+		);
+		const ssmClient = createLazyAwsClient(
+			'@aws-sdk/client-ssm',
+			'SSMClient',
+			awsConfig,
+		);
+		const secretsManagerClient = createLazyAwsClient(
+			'@aws-sdk/client-secrets-manager',
+			'SecretsManagerClient',
+			awsConfig,
+		);
 
 		const createExecutionContext = (itemIndex: number) => {
 			const workflowDataProxy = this.getWorkflowDataProxy(itemIndex);
 
 			// Create the execution context with AWS commands and selected n8n variables
 			return {
-				$s3: s3Client,
-				$bedrock: bedrockClient,
-				$kms: kmsClient,
-				$ssm: ssmClient,
-				$secretsManager: secretsManagerClient,
+				$s3: s3Client.client,
+				$bedrock: bedrockClient.client,
+				$kms: kmsClient.client,
+				$ssm: ssmClient.client,
+				$secretsManager: secretsManagerClient.client,
 				$vars: workflowDataProxy.$vars,
 				crypto: supportedUserModules.crypto,
 				require: createRestrictedRequire(),
 				// S3 Commands
-				ListBucketsCommand: S3Commands.ListBucketsCommand,
-				GetObjectCommand: S3Commands.GetObjectCommand,
-				PutObjectCommand: S3Commands.PutObjectCommand,
-				DeleteObjectCommand: S3Commands.DeleteObjectCommand,
-				CopyObjectCommand: S3Commands.CopyObjectCommand,
-				HeadObjectCommand: S3Commands.HeadObjectCommand,
-				ListObjectsV2Command: S3Commands.ListObjectsV2Command,
-				CreateBucketCommand: S3Commands.CreateBucketCommand,
-				DeleteBucketCommand: S3Commands.DeleteBucketCommand,
+				ListBucketsCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'ListBucketsCommand',
+				),
+				GetObjectCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'GetObjectCommand',
+				),
+				PutObjectCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'PutObjectCommand',
+				),
+				DeleteObjectCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'DeleteObjectCommand',
+				),
+				CopyObjectCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'CopyObjectCommand',
+				),
+				HeadObjectCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'HeadObjectCommand',
+				),
+				ListObjectsV2Command: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'ListObjectsV2Command',
+				),
+				CreateBucketCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'CreateBucketCommand',
+				),
+				DeleteBucketCommand: createLazyAwsCommand(
+					'@aws-sdk/client-s3',
+					'DeleteBucketCommand',
+				),
 				// Bedrock Commands
-				InvokeModelCommand: BedrockCommands.InvokeModelCommand,
-				InvokeModelWithResponseStreamCommand:
-					BedrockCommands.InvokeModelWithResponseStreamCommand,
-				ConverseCommand: BedrockCommands.ConverseCommand,
-				ConverseStreamCommand: BedrockCommands.ConverseStreamCommand,
+				InvokeModelCommand: createLazyAwsCommand(
+					'@aws-sdk/client-bedrock-runtime',
+					'InvokeModelCommand',
+				),
+				InvokeModelWithResponseStreamCommand: createLazyAwsCommand(
+					'@aws-sdk/client-bedrock-runtime',
+					'InvokeModelWithResponseStreamCommand',
+				),
+				ConverseCommand: createLazyAwsCommand(
+					'@aws-sdk/client-bedrock-runtime',
+					'ConverseCommand',
+				),
+				ConverseStreamCommand: createLazyAwsCommand(
+					'@aws-sdk/client-bedrock-runtime',
+					'ConverseStreamCommand',
+				),
 				// KMS Commands
-				EncryptCommand: KMSCommands.EncryptCommand,
-				DecryptCommand: KMSCommands.DecryptCommand,
-				ReEncryptCommand: KMSCommands.ReEncryptCommand,
-				GenerateDataKeyCommand: KMSCommands.GenerateDataKeyCommand,
-				GenerateDataKeyWithoutPlaintextCommand:
-					KMSCommands.GenerateDataKeyWithoutPlaintextCommand,
-				GenerateRandomCommand: KMSCommands.GenerateRandomCommand,
-				DescribeKeyCommand: KMSCommands.DescribeKeyCommand,
-				ListKeysCommand: KMSCommands.ListKeysCommand,
-				ListAliasesCommand: KMSCommands.ListAliasesCommand,
-				GetPublicKeyCommand: KMSCommands.GetPublicKeyCommand,
-				SignCommand: KMSCommands.SignCommand,
-				VerifyCommand: KMSCommands.VerifyCommand,
-				GenerateMacCommand: KMSCommands.GenerateMacCommand,
-				VerifyMacCommand: KMSCommands.VerifyMacCommand,
-				CreateKeyCommand: KMSCommands.CreateKeyCommand,
-				CreateAliasCommand: KMSCommands.CreateAliasCommand,
-				UpdateAliasCommand: KMSCommands.UpdateAliasCommand,
-				DeleteAliasCommand: KMSCommands.DeleteAliasCommand,
-				EnableKeyCommand: KMSCommands.EnableKeyCommand,
-				DisableKeyCommand: KMSCommands.DisableKeyCommand,
-				ScheduleKeyDeletionCommand: KMSCommands.ScheduleKeyDeletionCommand,
-				CancelKeyDeletionCommand: KMSCommands.CancelKeyDeletionCommand,
-				TagResourceCommand: KMSCommands.TagResourceCommand,
-				UntagResourceCommand: KMSCommands.UntagResourceCommand,
+				EncryptCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'EncryptCommand',
+				),
+				DecryptCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'DecryptCommand',
+				),
+				ReEncryptCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'ReEncryptCommand',
+				),
+				GenerateDataKeyCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'GenerateDataKeyCommand',
+				),
+				GenerateDataKeyWithoutPlaintextCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'GenerateDataKeyWithoutPlaintextCommand',
+				),
+				GenerateRandomCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'GenerateRandomCommand',
+				),
+				DescribeKeyCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'DescribeKeyCommand',
+				),
+				ListKeysCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'ListKeysCommand',
+				),
+				ListAliasesCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'ListAliasesCommand',
+				),
+				GetPublicKeyCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'GetPublicKeyCommand',
+				),
+				SignCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'SignCommand',
+				),
+				VerifyCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'VerifyCommand',
+				),
+				GenerateMacCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'GenerateMacCommand',
+				),
+				VerifyMacCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'VerifyMacCommand',
+				),
+				CreateKeyCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'CreateKeyCommand',
+				),
+				CreateAliasCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'CreateAliasCommand',
+				),
+				UpdateAliasCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'UpdateAliasCommand',
+				),
+				DeleteAliasCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'DeleteAliasCommand',
+				),
+				EnableKeyCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'EnableKeyCommand',
+				),
+				DisableKeyCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'DisableKeyCommand',
+				),
+				ScheduleKeyDeletionCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'ScheduleKeyDeletionCommand',
+				),
+				CancelKeyDeletionCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'CancelKeyDeletionCommand',
+				),
+				TagResourceCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'TagResourceCommand',
+				),
+				UntagResourceCommand: createLazyAwsCommand(
+					'@aws-sdk/client-kms',
+					'UntagResourceCommand',
+				),
 				// SSM Commands
-				GetParameterCommand: SSMCommands.GetParameterCommand,
-				GetParametersCommand: SSMCommands.GetParametersCommand,
-				GetParametersByPathCommand: SSMCommands.GetParametersByPathCommand,
-				PutParameterCommand: SSMCommands.PutParameterCommand,
-				DeleteParameterCommand: SSMCommands.DeleteParameterCommand,
-				DeleteParametersCommand: SSMCommands.DeleteParametersCommand,
+				GetParameterCommand: createLazyAwsCommand(
+					'@aws-sdk/client-ssm',
+					'GetParameterCommand',
+				),
+				GetParametersCommand: createLazyAwsCommand(
+					'@aws-sdk/client-ssm',
+					'GetParametersCommand',
+				),
+				GetParametersByPathCommand: createLazyAwsCommand(
+					'@aws-sdk/client-ssm',
+					'GetParametersByPathCommand',
+				),
+				PutParameterCommand: createLazyAwsCommand(
+					'@aws-sdk/client-ssm',
+					'PutParameterCommand',
+				),
+				DeleteParameterCommand: createLazyAwsCommand(
+					'@aws-sdk/client-ssm',
+					'DeleteParameterCommand',
+				),
+				DeleteParametersCommand: createLazyAwsCommand(
+					'@aws-sdk/client-ssm',
+					'DeleteParametersCommand',
+				),
 				// Secrets Manager Commands
-				GetSecretValueCommand: SecretsManagerCommands.GetSecretValueCommand,
-				BatchGetSecretValueCommand: SecretsManagerCommands.BatchGetSecretValueCommand,
-				PutSecretValueCommand: SecretsManagerCommands.PutSecretValueCommand,
-				CreateSecretCommand: SecretsManagerCommands.CreateSecretCommand,
-				UpdateSecretCommand: SecretsManagerCommands.UpdateSecretCommand,
-				DeleteSecretCommand: SecretsManagerCommands.DeleteSecretCommand,
-				DescribeSecretCommand: SecretsManagerCommands.DescribeSecretCommand,
-				ListSecretsCommand: SecretsManagerCommands.ListSecretsCommand,
-				RestoreSecretCommand: SecretsManagerCommands.RestoreSecretCommand,
+				GetSecretValueCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'GetSecretValueCommand',
+				),
+				BatchGetSecretValueCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'BatchGetSecretValueCommand',
+				),
+				PutSecretValueCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'PutSecretValueCommand',
+				),
+				CreateSecretCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'CreateSecretCommand',
+				),
+				UpdateSecretCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'UpdateSecretCommand',
+				),
+				DeleteSecretCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'DeleteSecretCommand',
+				),
+				DescribeSecretCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'DescribeSecretCommand',
+				),
+				ListSecretsCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'ListSecretsCommand',
+				),
+				RestoreSecretCommand: createLazyAwsCommand(
+					'@aws-sdk/client-secrets-manager',
+					'RestoreSecretCommand',
+				),
 			};
 		};
 
